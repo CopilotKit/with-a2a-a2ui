@@ -9,12 +9,11 @@ import { A2AClient } from "@a2a-js/sdk/client";
 
 const a2aClient = new A2AClient("http://localhost:10002");
 
-const agent = new A2AAgent({ a2aClient, debug: true });
+const agent = new A2AAgent({ a2aClient });
 
 const runtime = new CopilotRuntime({
   agents: {
     default: agent,
-    my_agent: agent,
   },
   runner: new InMemoryAgentRunner(),
 });

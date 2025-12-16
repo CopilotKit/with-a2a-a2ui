@@ -18,19 +18,11 @@ export default function Home() {
       renderActivityMessages={activityRenderers}
     >
       <main
-        className="flex min-h-screen flex-1 flex-col overflow-hidden"
+        className="h-full overflow-auto w-screen"
         style={{ minHeight: "100dvh" }}
       >
-        <Chat />
+        <CopilotChat className="h-full" />;
       </main>
     </CopilotKitProvider>
-  );
-}
-
-function Chat() {
-  return (
-    <div className="flex flex-1 flex-col overflow-hidden">
-      <CopilotChat style={{ flex: 1, minHeight: "100%" }} agentId="my_agent" threadId="my_thread"/>
-    </div>
   );
 }
