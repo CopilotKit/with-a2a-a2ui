@@ -15,10 +15,12 @@
 import json
 import logging
 import os
+import time
 from collections.abc import AsyncIterable
 from typing import Any
 
 import jsonschema
+import litellm
 from google.adk.agents.llm_agent import LlmAgent
 from google.adk.artifacts import InMemoryArtifactService
 from google.adk.memory.in_memory_memory_service import InMemoryMemoryService
@@ -35,6 +37,11 @@ from prompt_builder import (
 from tools import get_restaurants
 
 logger = logging.getLogger(__name__)
+
+# Error handling configuration
+RATE_LIMIT_RETRY_DELAY = 30  # seconds to wait before retrying after rate limit
+MAX_RATE_LIMIT_RETRIES = 3  # maximum number of retries for rate limit errors
+GENERAL_ERROR_RETRY_DELAY = 5  # seconds to wait for general errors
 
 AGENT_INSTRUCTION = """
     You are a helpful restaurant finding assistant. Your goal is to help users find and book restaurants using a rich UI.
@@ -93,7 +100,7 @@ class RestaurantAgent:
 
     def _build_agent(self, use_ui: bool) -> LlmAgent:
         """Builds the LLM agent for the restaurant agent."""
-        LITELLM_MODEL = os.getenv("LITELLM_MODEL", "o4-mini")
+        LITELLM_MODEL = os.getenv("LITELLM_MODEL", "openrouter/google/gemini-2.0-flash-exp:free")
 
         if use_ui:
             # Construct the full prompt with UI instructions, examples, and schema
@@ -133,6 +140,7 @@ class RestaurantAgent:
         max_retries = 1  # Total 2 attempts
         attempt = 0
         current_query_text = query
+        rate_limit_retry_count = 0
 
         # Ensure schema was loaded
         if self.use_ui and self.a2ui_schema_object is None:
@@ -161,29 +169,163 @@ class RestaurantAgent:
             )
             final_response_content = None
 
-            async for event in self._runner.run_async(
-                user_id=self._user_id,
-                session_id=session.id,
-                new_message=current_message,
-            ):
-                logger.info(f"Event from runner: {event}")
-                if event.is_final_response():
-                    if (
-                        event.content
-                        and event.content.parts
-                        and event.content.parts[0].text
-                    ):
-                        final_response_content = "\n".join(
-                            [p.text for p in event.content.parts if p.text]
-                        )
-                    break  # Got the final response, stop consuming events
-                else:
-                    logger.info(f"Intermediate event: {event}")
-                    # Yield intermediate updates on every attempt
+            try:
+                async for event in self._runner.run_async(
+                    user_id=self._user_id,
+                    session_id=session.id,
+                    new_message=current_message,
+                ):
+                    logger.info(f"Event from runner: {event}")
+                    if event.is_final_response():
+                        if (
+                            event.content
+                            and event.content.parts
+                            and event.content.parts[0].text
+                        ):
+                            final_response_content = "\n".join(
+                                [p.text for p in event.content.parts if p.text]
+                            )
+                        break  # Got the final response, stop consuming events
+                    else:
+                        logger.info(f"Intermediate event: {event}")
+                        # Yield intermediate updates on every attempt
+                        yield {
+                            "is_task_complete": False,
+                            "updates": self.get_processing_message(),
+                        }
+
+                # Reset rate limit counter on success
+                rate_limit_retry_count = 0
+
+            except litellm.RateLimitError as e:
+                rate_limit_retry_count += 1
+                logger.error(
+                    f"--- RestaurantAgent.stream: Rate limit error (attempt {rate_limit_retry_count}/{MAX_RATE_LIMIT_RETRIES}): {e} ---"
+                )
+
+                if rate_limit_retry_count <= MAX_RATE_LIMIT_RETRIES:
+                    retry_after = RATE_LIMIT_RETRY_DELAY
+
+                    # Try to extract retry-after from error message if available
+                    error_msg = str(e)
+                    if "retry after" in error_msg.lower():
+                        try:
+                            # Try to parse retry-after time from error message
+                            import re
+                            match = re.search(r'retry.*?(\d+)', error_msg, re.IGNORECASE)
+                            if match:
+                                retry_after = int(match.group(1))
+                        except:
+                            pass
+
                     yield {
                         "is_task_complete": False,
-                        "updates": self.get_processing_message(),
+                        "updates": (
+                            f"The AI service is currently experiencing high demand. "
+                            f"Retrying in {retry_after} seconds... "
+                            f"(Attempt {rate_limit_retry_count}/{MAX_RATE_LIMIT_RETRIES})"
+                        ),
                     }
+
+                    logger.info(f"Waiting {retry_after} seconds before retry...")
+                    time.sleep(retry_after)
+
+                    # Don't increment attempt counter for rate limits, just retry
+                    attempt -= 1
+                    continue
+                else:
+                    logger.error("--- Max rate limit retries exceeded ---")
+                    yield {
+                        "is_task_complete": True,
+                        "content": (
+                            "I apologize, but the AI service is currently experiencing very high demand "
+                            "and is temporarily rate-limited. Please try again in a few minutes. "
+                            "\n\nAlternatively, you can:\n"
+                            "1. Wait a few minutes and try again\n"
+                            "2. Check if your API provider has rate limit restrictions\n"
+                            "3. Consider using a different model in your .env configuration"
+                        ),
+                    }
+                    return
+
+            except litellm.APIConnectionError as e:
+                logger.error(f"--- RestaurantAgent.stream: API connection error: {e} ---")
+                yield {
+                    "is_task_complete": True,
+                    "content": (
+                        "I'm sorry, I'm having trouble connecting to the AI service. "
+                        "Please check your internet connection and try again."
+                    ),
+                }
+                return
+
+            except litellm.AuthenticationError as e:
+                logger.error(f"--- RestaurantAgent.stream: Authentication error: {e} ---")
+                yield {
+                    "is_task_complete": True,
+                    "content": (
+                        "Authentication error: Please check your API key configuration in the .env file. "
+                        "Make sure OPENROUTER_API_KEY or OPENAI_API_KEY is set correctly."
+                    ),
+                }
+                return
+
+            except litellm.InvalidRequestError as e:
+                logger.error(f"--- RestaurantAgent.stream: Invalid request error: {e} ---")
+                yield {
+                    "is_task_complete": True,
+                    "content": (
+                        "I'm sorry, there was an issue with the request. "
+                        "This might be due to an invalid model configuration or request parameters. "
+                        f"Error: {str(e)}"
+                    ),
+                }
+                return
+
+            except litellm.ContextWindowExceededError as e:
+                logger.error(f"--- RestaurantAgent.stream: Context window exceeded: {e} ---")
+                yield {
+                    "is_task_complete": True,
+                    "content": (
+                        "I'm sorry, the conversation has become too long for the AI model to process. "
+                        "Please start a new conversation or try with a shorter query."
+                    ),
+                }
+                return
+
+            except (litellm.APIError, litellm.ServiceUnavailableError, litellm.InternalServerError) as e:
+                logger.error(f"--- RestaurantAgent.stream: API service error: {e} ---")
+
+                if attempt <= max_retries:
+                    yield {
+                        "is_task_complete": False,
+                        "updates": (
+                            f"The AI service encountered a temporary error. "
+                            f"Retrying in {GENERAL_ERROR_RETRY_DELAY} seconds..."
+                        ),
+                    }
+                    time.sleep(GENERAL_ERROR_RETRY_DELAY)
+                    continue
+                else:
+                    yield {
+                        "is_task_complete": True,
+                        "content": (
+                            "I'm sorry, the AI service is currently experiencing technical difficulties. "
+                            "Please try again in a few moments."
+                        ),
+                    }
+                    return
+
+            except Exception as e:
+                logger.error(f"--- RestaurantAgent.stream: Unexpected error: {type(e).__name__}: {e} ---")
+                yield {
+                    "is_task_complete": True,
+                    "content": (
+                        f"I'm sorry, an unexpected error occurred: {type(e).__name__}. "
+                        "Please try again or contact support if the issue persists."
+                    ),
+                }
+                return
 
             if final_response_content is None:
                 logger.warning(

@@ -125,28 +125,47 @@ Agent responses split into two parts with `---a2ui_JSON---` delimiter:
 
 Create `agent/.env`:
 ```
-# OpenAI API Key (for o1-mini model)
+# OpenRouter API Key (recommended - access to multiple providers)
+# Get your API key from: https://openrouter.ai/keys
+OPENROUTER_API_KEY=your-openrouter-api-key-here
+
+# OpenAI API Key (optional - for direct OpenAI access)
 # Get your API key from: https://platform.openai.com/api-keys
 OPENAI_API_KEY=your-openai-api-key-here
 
-# Model selection (default: o1-mini)
-# Available OpenAI models with tool support:
-# - o1-mini (reasoning model, recommended for complex tasks)
-# - gpt-4o (multimodal, fast)
-# - gpt-4o-mini (cheaper, faster)
-# - gpt-4-turbo (legacy)
+# Google API Key (optional - for direct Google access)
+# Get your API key from: https://aistudio.google.com/apikey
+GOOGLE_API_KEY=your-google-api-key-here
+
+# Model selection (default: openrouter/google/gemini-2.0-flash-thinking-exp:free)
 #
-# Other supported models:
-# - gemini/gemini-2.0-flash-exp (Google, free tier available)
-# - perplexity/llama-3.1-sonar-large-128k-online (NO tool support)
-LITELLM_MODEL=o1-mini
+# OpenRouter models (use openrouter/ prefix):
+# Free models with TOOL CALLING support (REQUIRED for this app):
+#   - openrouter/google/gemini-2.0-flash-thinking-exp:free (RECOMMENDED - Google, reasoning + tools)
+#   - openrouter/qwen/qwq-32b-preview:free (Qwen reasoning model with tools)
+#   - openrouter/mistralai/mistral-small-3.1:free (Mistral Small, function calling)
+#   - openrouter/google/gemini-2.0-flash-exp:free (Google Gemini 2.0, may have rate limits)
+#
+# ⚠️ Models WITHOUT tool support (DO NOT USE):
+#   - openrouter/deepseek/deepseek-r1-* (no tool calling support)
+#   - openrouter/deepseek/deepseek-chat:free (no tool calling support)
+# Paid models:
+#   - openrouter/openai/gpt-4o (OpenAI GPT-4o via OpenRouter)
+#   - openrouter/anthropic/claude-3.5-sonnet (Claude 3.5 Sonnet)
+#   - openrouter/meta-llama/llama-3.1-70b-instruct (Meta Llama 3.1)
+#
+# Direct provider models (requires respective API keys):
+#   - OpenAI: o1-mini, gpt-4o, gpt-4o-mini, gpt-4-turbo
+#   - Google: gemini/gemini-2.0-flash-exp, gemini/gemini-2.5-flash-lite
+#   - Perplexity (NO tool support): perplexity/llama-3.1-sonar-large-128k-online
+LITELLM_MODEL=openrouter/google/gemini-2.0-flash-exp:free
 
 # Retry and timeout configuration
 LITELLM_NUM_RETRIES=3
 LITELLM_TIMEOUT=60
 ```
 
-> **Note:** Get your OpenAI API key from [https://platform.openai.com/api-keys](https://platform.openai.com/api-keys)
+> **Note:** Get your OpenRouter API key from [https://openrouter.ai/keys](https://openrouter.ai/keys) (recommended) or OpenAI key from [https://platform.openai.com/api-keys](https://platform.openai.com/api-keys)
 
 ## File Locations
 
