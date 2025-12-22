@@ -50,7 +50,7 @@ bun install
 Create a `.env` file inside the `agent` folder with the following content:
 
 ```
-GEMENI_API_KEY=sk-...your-openai-key-here...
+GEMINI_API_KEY=sk-...your-openai-key-here...
 ```
 
 
