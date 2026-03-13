@@ -8,21 +8,28 @@ import { theme } from "./theme";
 export const dynamic = "force-dynamic";
 
 const A2UIMessageRenderer = createA2UIMessageRenderer({ theme });
-const activityRenderers = [A2UIMessageRenderer];
 
 export default function Home() {
   return (
     <CopilotKitProvider
       runtimeUrl="/api/copilotkit"
       showDevConsole="auto"
-      renderActivityMessages={activityRenderers}
+      renderActivityMessages={[A2UIMessageRenderer]}
     >
       <main
-        className="h-full overflow-auto w-screen"
+        className="flex min-h-screen flex-1 flex-col overflow-hidden"
         style={{ minHeight: "100dvh" }}
       >
-        <CopilotChat className="h-full" />;
+        <Chat />
       </main>
     </CopilotKitProvider>
+  );
+}
+
+function Chat() {
+  return (
+    <div className="flex flex-1 flex-col overflow-hidden">
+      <CopilotChat style={{ flex: 1, minHeight: "100%" }} />
+    </div>
   );
 }
